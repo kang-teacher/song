@@ -38,8 +38,7 @@ export function buildStyle(s: SongSettings): string {
   return [s.genre, s.mood, s.tempo, ...s.instruments, vocal, "Korean lyrics"].filter(Boolean).join(", ");
 }
 
-export async function createSong(s: SongSettings, callbackUrl: string): Promise<string> {
-  const key = process.env.SUNO_API_KEY;
+export async function createSong(s: SongSettings, callbackUrl: string, key: string | undefined): Promise<string> {
   if (!key) return `${DEMO_PREFIX}${Date.now()}`;
 
   const res = await fetch(`${BASE}/api/v1/generate`, {
@@ -58,23 +57,26 @@ export async function createSong(s: SongSettings, callbackUrl: string): Promise<
   });
 
   const json = await res.json().catch(() => null);
+  if (res.status === 401 || json?.code === 401) {
+    throw new Error("Suno API 키가 올바르지 않아요. 왼쪽 칸의 키를 확인해 주세요.");
+  }
   if (!res.ok || json?.code !== 200 || !json?.data?.taskId) {
     throw new Error(`노래 생성 요청 실패: ${json?.msg ?? res.statusText}`);
   }
   return json.data.taskId as string;
 }
 
-export async function getSongStatus(taskId: string): Promise<SongStatus> {
+export async function getSongStatus(taskId: string, key: string | undefined): Promise<SongStatus> {
   if (taskId.startsWith(DEMO_PREFIX)) {
     return {
       status: "failed",
-      message: "데모 모드예요. SUNO_API_KEY를 설정하면 실제 노래가 만들어져요.",
+      message: "데모 모드예요. 왼쪽 칸에 Suno API 키를 넣으면 실제 노래가 만들어져요.",
       tracks: [],
     };
   }
 
   const res = await fetch(`${BASE}/api/v1/generate/record-info?taskId=${encodeURIComponent(taskId)}`, {
-    headers: { Authorization: `Bearer ${process.env.SUNO_API_KEY}` },
+    headers: { Authorization: `Bearer ${key}` },
     cache: "no-store",
   });
   const json = await res.json().catch(() => null);

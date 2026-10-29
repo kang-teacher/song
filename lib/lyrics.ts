@@ -37,12 +37,12 @@ const SYSTEM = `너는 초·중·고등학생이 UN 지속가능발전목표(SDG
 - 가사는 Suno 노래 생성기에 그대로 넣을 수 있도록 [Verse], [Chorus], [Bridge] 같은 영어 구간 표시를 각 구간 앞에 한 줄로 붙여.
 - 가사 외의 설명, 코드 등 다른 텍스트는 넣지 마.`;
 
-export async function generateLyrics(req: LyricsRequest): Promise<LyricsResult> {
-  if (!process.env.ANTHROPIC_API_KEY) {
+export async function generateLyrics(req: LyricsRequest, apiKey: string | undefined): Promise<LyricsResult> {
+  if (!apiKey) {
     return demoLyrics(req);
   }
 
-  const client = new Anthropic();
+  const client = new Anthropic({ apiKey });
   const prompt = `SDG ${req.sdg.id}번 "${req.sdg.title}" (${req.sdg.short})를 주제로 노래 가사를 써 줘.
 
 학생이 전하고 싶은 메시지: ${req.message || "(없음)"}
@@ -53,15 +53,22 @@ export async function generateLyrics(req: LyricsRequest): Promise<LyricsResult> 
 
 노래 제목(title)과 가사(lyrics)를 만들어 줘.`;
 
-  const response = await client.beta.messages.parse({
-    model: process.env.CLAUDE_MODEL || "claude-opus-5-5",
-    max_tokens: 16000,
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
-    output_config: { effort: "low", format: betaZodOutputFormat(LyricsSchema) },
-    system: SYSTEM,
-    messages: [{ role: "user", content: prompt }],
-  });
+  const response = await client.beta.messages
+    .parse({
+      model: process.env.CLAUDE_MODEL || "claude-opus-5-5",
+      max_tokens: 16000,
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      output_config: { effort: "low", format: betaZodOutputFormat(LyricsSchema) },
+      system: SYSTEM,
+      messages: [{ role: "user", content: prompt }],
+    })
+    .catch((e) => {
+      if (e instanceof Anthropic.AuthenticationError) {
+        throw new Error("Claude API 키가 올바르지 않아요. 왼쪽 칸의 키를 확인해 주세요.");
+      }
+      throw e;
+    });
 
   if (response.stop_reason === "refusal" || !response.parsed_output) {
     throw new Error("가사를 만들지 못했어요. 내용을 조금 바꿔서 다시 시도해 주세요.");

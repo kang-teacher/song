@@ -42,8 +42,11 @@ const EMPTY: Draft = {
 const STEPS = ["주제 고르기", "아이디어 정리", "가사 다듬기", "노래 설정", "노래 듣기"];
 const DRAFT_KEY = "sdgs-song-draft";
 const CODE_KEY = "sdgs-class-code";
+const KEYS_KEY = "sdgs-api-keys";
 
-type Config = { needsClassCode: boolean; lyricsDemo: boolean; songDemo: boolean };
+type Config = { needsClassCode: boolean; serverAnthropicKey: boolean; serverSunoKey: boolean };
+type ApiKeys = { anthropic: string; suno: string };
+const NO_KEYS: ApiKeys = { anthropic: "", suno: "" };
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -59,12 +62,14 @@ export default function SongMaker() {
   const [loaded, setLoaded] = useState(false);
   const [config, setConfig] = useState<Config | null>(null);
   const [classCode, setClassCode] = useState("");
+  const [keys, setKeys] = useState<ApiKeys>(NO_KEYS);
 
   useEffect(() => {
     setD(load(DRAFT_KEY, EMPTY));
     try {
       setClassCode(localStorage.getItem(CODE_KEY) ?? "");
     } catch {}
+    setKeys(load(KEYS_KEY, NO_KEYS));
     setLoaded(true);
     fetch("/api/config")
       .then((r) => r.json())
@@ -93,10 +98,26 @@ export default function SongMaker() {
     } catch {}
   };
 
+  const saveKeys = (next: ApiKeys) => {
+    setKeys(next);
+    try {
+      localStorage.setItem(KEYS_KEY, JSON.stringify(next));
+    } catch {}
+  };
+
+  // 왼쪽 칸에 입력한 키는 요청 헤더로 이 사이트의 서버에 전달되고, 서버가 그 키로 Claude/Suno를 호출한다.
+  const authHeaders: Record<string, string> = {
+    "x-class-code": classCode,
+    "x-anthropic-key": keys.anthropic.trim(),
+    "x-suno-key": keys.suno.trim(),
+  };
+  const lyricsDemo = config ? !config.serverAnthropicKey && !keys.anthropic.trim() : false;
+  const songDemo = config ? !config.serverSunoKey && !keys.suno.trim() : false;
+
   const api = async (url: string, body: unknown) => {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-class-code": classCode },
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify(body),
     });
     const json = await res.json().catch(() => ({}));
@@ -109,51 +130,112 @@ export default function SongMaker() {
   };
 
   return (
-    <main className="wrap">
-      <header className="top">
-        <h1>
-          <span className="logo">🎵</span> SDGs 노래 만들기
-        </h1>
-        <p className="sub">지속가능발전목표 17개 중 하나를 골라, 세상을 바꾸는 나만의 노래를 만들어 봐요!</p>
-        {config?.needsClassCode && (
-          <label className="code">
-            수업 코드
-            <input value={classCode} onChange={(e) => saveCode(e.target.value)} placeholder="선생님이 알려준 코드" />
-          </label>
-        )}
-        {config && (config.lyricsDemo || config.songDemo) && (
-          <p className="demo-banner">
-            데모 모드: {config.lyricsDemo && "가사는 예시로 만들어지고"}
-            {config.lyricsDemo && config.songDemo && ", "}
-            {config.songDemo && "노래는 실제로 만들어지지 않아요"}. (선생님: README의 API 키 설정을 확인하세요)
-          </p>
-        )}
-      </header>
+    <div className="layout">
+      <KeyPanel keys={keys} onChange={saveKeys} config={config} />
+      <main className="wrap">
+        <header className="top">
+          <h1>
+            <span className="logo">🎵</span> SDGs 노래 만들기
+          </h1>
+          <p className="sub">지속가능발전목표 17개 중 하나를 골라, 세상을 바꾸는 나만의 노래를 만들어 봐요!</p>
+          {config?.needsClassCode && (
+            <label className="code">
+              수업 코드
+              <input value={classCode} onChange={(e) => saveCode(e.target.value)} placeholder="선생님이 알려준 코드" />
+            </label>
+          )}
+          {(lyricsDemo || songDemo) && (
+            <p className="demo-banner">
+              데모 모드: {lyricsDemo && "가사는 예시로 만들어지고"}
+              {lyricsDemo && songDemo && ", "}
+              {songDemo && "노래는 실제로 만들어지지 않아요"}. API 키 설정 칸에 키를 넣어 주세요.
+            </p>
+          )}
+        </header>
 
-      <nav className="steps" aria-label="진행 단계">
-        {STEPS.map((label, i) => (
-          <button
-            key={label}
-            className={`step ${i === d.step ? "on" : ""} ${i < d.step ? "done" : ""}`}
-            disabled={i > d.step}
-            onClick={() => goto(i)}
-          >
-            <span className="num">{i < d.step ? "✓" : i + 1}</span>
-            <span className="label">{label}</span>
-          </button>
-        ))}
-      </nav>
+        <nav className="steps" aria-label="진행 단계">
+          {STEPS.map((label, i) => (
+            <button
+              key={label}
+              className={`step ${i === d.step ? "on" : ""} ${i < d.step ? "done" : ""}`}
+              disabled={i > d.step}
+              onClick={() => goto(i)}
+            >
+              <span className="num">{i < d.step ? "✓" : i + 1}</span>
+              <span className="label">{label}</span>
+            </button>
+          ))}
+        </nav>
 
-      {d.step === 0 && <PickGoal selected={d.sdgId} onPick={(id) => { update({ sdgId: id, keywords: [] }); goto(1); }} />}
-      {d.step === 1 && sdg && <Brainstorm d={d} sdg={sdg} update={update} api={api} onDone={() => goto(2)} />}
-      {d.step === 2 && sdg && <EditLyrics d={d} sdg={sdg} update={update} api={api} onBack={() => goto(1)} onDone={() => goto(3)} />}
-      {d.step === 3 && <Settings d={d} update={update} onBack={() => goto(2)} onDone={() => goto(4)} />}
-      {d.step === 4 && <Generate d={d} api={api} onBack={() => goto(3)} />}
+        {d.step === 0 && <PickGoal selected={d.sdgId} onPick={(id) => { update({ sdgId: id, keywords: [] }); goto(1); }} />}
+        {d.step === 1 && sdg && <Brainstorm d={d} sdg={sdg} update={update} api={api} onDone={() => goto(2)} />}
+        {d.step === 2 && sdg && <EditLyrics d={d} sdg={sdg} update={update} api={api} onBack={() => goto(1)} onDone={() => goto(3)} />}
+        {d.step === 3 && <Settings d={d} update={update} onBack={() => goto(2)} onDone={() => goto(4)} />}
+        {d.step === 4 && <Generate d={d} api={api} sunoKey={keys.suno.trim()} onBack={() => goto(3)} />}
 
-      <footer className="foot">
-        <button className="link" onClick={reset}>처음부터 다시 만들기</button>
-      </footer>
-    </main>
+        <footer className="foot">
+          <button className="link" onClick={reset}>처음부터 다시 만들기</button>
+        </footer>
+      </main>
+    </div>
+  );
+}
+
+/* 왼쪽 칸: API 키 입력 */
+function KeyPanel({ keys, onChange, config }: { keys: ApiKeys; onChange: (k: ApiKeys) => void; config: Config | null }) {
+  const [show, setShow] = useState(false);
+
+  const status = (typed: string, server: boolean | undefined) =>
+    typed.trim() ? { text: "입력됨", cls: "ok" } : server ? { text: "서버 키 사용 중", cls: "ok" } : { text: "없음 (데모)", cls: "none" };
+  const a = status(keys.anthropic, config?.serverAnthropicKey);
+  const s = status(keys.suno, config?.serverSunoKey);
+
+  return (
+    <aside className="keys">
+      <details open>
+        <summary>🔑 API 키 설정</summary>
+        <p className="muted small">입력한 키는 이 컴퓨터의 브라우저에만 저장돼요.</p>
+
+        <label>
+          <span>
+            Claude API 키 <em className={`dot ${a.cls}`}>{a.text}</em>
+          </span>
+          <input
+            type={show ? "text" : "password"}
+            value={keys.anthropic}
+            onChange={(e) => onChange({ ...keys, anthropic: e.target.value })}
+            placeholder="sk-ant-..."
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <span className="muted small">가사 만들기에 쓰여요</span>
+        </label>
+
+        <label>
+          <span>
+            Suno API 키 <em className={`dot ${s.cls}`}>{s.text}</em>
+          </span>
+          <input
+            type={show ? "text" : "password"}
+            value={keys.suno}
+            onChange={(e) => onChange({ ...keys, suno: e.target.value })}
+            placeholder="sunoapi.org 키"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <span className="muted small">노래 만들기에 쓰여요</span>
+        </label>
+
+        <div className="row between">
+          <button className="link" onClick={() => setShow(!show)}>{show ? "키 숨기기" : "키 보기"}</button>
+          <button className="link" onClick={() => confirm("입력한 키를 지울까요?") && onChange(NO_KEYS)}>키 지우기</button>
+        </div>
+
+        <p className="warn small">
+          ⚠️ 이 컴퓨터를 쓰는 사람은 누구나 키를 볼 수 있어요. 공용 컴퓨터라면 수업이 끝난 뒤 <b>키 지우기</b>를 눌러 주세요.
+        </p>
+      </details>
+    </aside>
   );
 }
 
@@ -460,7 +542,7 @@ function Settings({ d, update, onBack, onDone }: { d: Draft; update: Update; onB
 }
 
 /* 5단계: 노래 생성과 감상 */
-function Generate({ d, api, onBack }: { d: Draft; api: Api; onBack: () => void }) {
+function Generate({ d, api, sunoKey, onBack }: { d: Draft; api: Api; sunoKey: string; onBack: () => void }) {
   const [taskId, setTaskId] = useState<string | null>(null);
   const [status, setStatus] = useState<SongStatus | null>(null);
   const [error, setError] = useState("");
@@ -495,7 +577,7 @@ function Generate({ d, api, onBack }: { d: Draft; api: Api; onBack: () => void }
     const poll = async () => {
       while (!stop) {
         try {
-          const res = await fetch(`/api/song/${encodeURIComponent(taskId)}`);
+          const res = await fetch(`/api/song/${encodeURIComponent(taskId)}`, { headers: { "x-suno-key": sunoKey } });
           const s: SongStatus & { error?: string } = await res.json();
           if (!res.ok) throw new Error(s.error);
           if (stop) return;
