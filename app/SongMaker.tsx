@@ -4,7 +4,16 @@ import { useEffect, useRef, useState } from "react";
 import { SDGS, getSdg, type Sdg } from "@/lib/sdgs";
 import { GENRES, INSTRUMENTS, LENGTHS, LYRIC_MOODS, MOODS, TEMPOS, VOCALS } from "@/lib/options";
 import { generateLyrics } from "@/lib/lyrics";
-import { createSong, getSongStatus, type SongStatus } from "@/lib/suno";
+import {
+  createSong,
+  createVideo,
+  getSongStatus,
+  getVideoStatus,
+  saveFile,
+  type SongStatus,
+  type SongTrack,
+  type VideoStatus,
+} from "@/lib/suno";
 
 type Draft = {
   step: number;
@@ -21,6 +30,7 @@ type Draft = {
   mood: string;
   tempo: string;
   instruments: string[];
+  author: string;
 };
 
 const EMPTY: Draft = {
@@ -38,6 +48,7 @@ const EMPTY: Draft = {
   mood: MOODS[0].value,
   tempo: TEMPOS[1].value,
   instruments: [],
+  author: "",
 };
 
 const STEPS = ["주제 고르기", "아이디어 정리", "가사 다듬기", "노래 설정", "노래 듣기"];
@@ -116,6 +127,8 @@ export default function SongMaker() {
       );
     },
     status: (taskId) => getSongStatus(taskId, sunoKey),
+    video: (taskId, audioId) => createVideo(taskId, audioId, d.author, sunoKey),
+    videoStatus: (videoTaskId) => getVideoStatus(videoTaskId, sunoKey),
   };
 
   const reset = () => {
@@ -158,7 +171,7 @@ export default function SongMaker() {
         {d.step === 1 && sdg && <Brainstorm d={d} sdg={sdg} update={update} api={api} onDone={() => goto(2)} />}
         {d.step === 2 && sdg && <EditLyrics d={d} sdg={sdg} update={update} api={api} onBack={() => goto(1)} onDone={() => goto(3)} />}
         {d.step === 3 && <Settings d={d} update={update} onBack={() => goto(2)} onDone={() => goto(4)} />}
-        {d.step === 4 && <Generate d={d} api={api} onBack={() => goto(3)} />}
+        {d.step === 4 && <Generate d={d} api={api} update={update} onBack={() => goto(3)} />}
 
         <footer className="foot">
           <button className="link" onClick={reset}>처음부터 다시 만들기</button>
@@ -229,6 +242,8 @@ type Api = {
   lyrics: (sdg: Sdg) => Promise<{ title: string; lyrics: string }>;
   song: () => Promise<string>;
   status: (taskId: string) => Promise<SongStatus>;
+  video: (taskId: string, audioId: string) => Promise<string>;
+  videoStatus: (videoTaskId: string) => Promise<VideoStatus>;
 };
 type Update = (patch: Partial<Draft>) => void;
 
@@ -523,7 +538,7 @@ function Settings({ d, update, onBack, onDone }: { d: Draft; update: Update; onB
 }
 
 /* 5단계: 노래 생성과 감상 */
-function Generate({ d, api, onBack }: { d: Draft; api: Api; onBack: () => void }) {
+function Generate({ d, api, update, onBack }: { d: Draft; api: Api; update: Update; onBack: () => void }) {
   const [taskId, setTaskId] = useState<string | null>(null);
   const [status, setStatus] = useState<SongStatus | null>(null);
   const [error, setError] = useState("");
@@ -594,19 +609,23 @@ function Generate({ d, api, onBack }: { d: Draft; api: Api; onBack: () => void }
         {error && <p className="error">{error}</p>}
         {status?.status === "failed" && <p className="error">{status.message}</p>}
 
+        {status?.status === "done" && playable.length > 0 && (
+          <label className="author">
+            <span>내 이름 (MP4 영상 첫 화면에 나와요)</span>
+            <input value={d.author} onChange={(e) => update({ author: e.target.value })} maxLength={50} placeholder="예) 3학년 2반 김하늘" />
+          </label>
+        )}
+
         {playable.map((t, i) => (
-          <div key={t.id || i} className="track">
-            {t.imageUrl && <img src={t.imageUrl} alt="" />}
-            <div className="track-body">
-              <strong>버전 {i + 1}</strong>
-              <audio controls src={t.audioUrl || t.streamUrl} preload="none" />
-              {t.audioUrl && (
-                <a className="link" href={t.audioUrl} target="_blank" rel="noreferrer" download>
-                  MP3 내려받기
-                </a>
-              )}
-            </div>
-          </div>
+          <Track
+            key={t.id || i}
+            track={t}
+            index={i}
+            fileBase={`${d.author.trim() ? `${d.author.trim()}-` : ""}${d.title.trim() || "SDGs노래"}-버전${i + 1}`}
+            canMakeVideo={status?.status === "done" && !!taskId && !!t.id}
+            makeVideo={() => api.video(taskId!, t.id)}
+            videoStatus={api.videoStatus}
+          />
         ))}
 
         <details className="lyrics-view">
@@ -624,5 +643,105 @@ function Generate({ d, api, onBack }: { d: Draft; api: Api; onBack: () => void }
         </div>
       </div>
     </section>
+  );
+}
+
+
+/* 완성된 트랙 하나: 듣기, MP3 내려받기, MP4 영상 만들기 */
+function Track({
+  track: t,
+  index,
+  fileBase,
+  canMakeVideo,
+  makeVideo,
+  videoStatus,
+}: {
+  track: SongTrack;
+  index: number;
+  fileBase: string;
+  canMakeVideo: boolean;
+  makeVideo: () => Promise<string>;
+  videoStatus: Api["videoStatus"];
+}) {
+  const [videoTask, setVideoTask] = useState<string | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const start = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      setVideoTask(await makeVideo());
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!videoTask) return;
+    let stop = false;
+    (async () => {
+      while (!stop) {
+        try {
+          const v = await videoStatus(videoTask);
+          if (stop) return;
+          if (v.status === "done") {
+            setVideoUrl(v.videoUrl!);
+            break;
+          }
+          if (v.status === "failed") {
+            setError(v.message || "영상 만들기에 실패했어요.");
+            break;
+          }
+        } catch (e) {
+          setError((e as Error).message);
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 5000));
+      }
+      setBusy(false);
+    })();
+    return () => {
+      stop = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoTask]);
+
+  const save = async (url: string, ext: string) => {
+    setSaving(true);
+    await saveFile(url, `${fileBase}.${ext}`);
+    setSaving(false);
+  };
+
+  return (
+    <div className="track">
+      {t.imageUrl && <img src={t.imageUrl} alt="" />}
+      <div className="track-body">
+        <strong>버전 {index + 1}</strong>
+        <audio controls src={t.audioUrl || t.streamUrl} preload="none" />
+        <div className="row wrap-row">
+          {t.audioUrl && (
+            <button className="btn ghost" disabled={saving} onClick={() => save(t.audioUrl, "mp3")}>
+              🎵 MP3 내려받기
+            </button>
+          )}
+          {canMakeVideo && !videoUrl && (
+            <button className="btn ghost" disabled={busy} onClick={start}>
+              {busy ? "영상 만드는 중… (1~2분)" : "🎬 MP4 영상 만들기"}
+            </button>
+          )}
+          {videoUrl && (
+            <button className="btn primary" disabled={saving} onClick={() => save(videoUrl, "mp4")}>
+              🎬 MP4 내려받기
+            </button>
+          )}
+        </div>
+        {videoUrl && <video className="video" controls src={videoUrl} preload="metadata" />}
+        {error && <p className="error">{error}</p>}
+      </div>
+    </div>
   );
 }
