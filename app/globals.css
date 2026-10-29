@@ -143,6 +143,10 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); bo
 .track img { width: 88px; height: 88px; object-fit: cover; border-radius: 10px; }
 .track-body { display: flex; flex-direction: column; gap: 6px; flex: 1; }
 .track audio { width: 100%; }
+.track { align-items: flex-start; }
+.track .wrap-row { gap: 8px; }
+.track .video { width: 100%; max-width: 480px; border-radius: 10px; background: #000; }
+.author { display: flex; flex-direction: column; gap: 6px; font-weight: 600; margin: 8px 0 4px; max-width: 360px; }
 
 .lyrics-view { margin: 14px 0; }
 .lyrics-view pre { white-space: pre-wrap; font-family: inherit; background: var(--bg); padding: 12px; border-radius: 10px; }
