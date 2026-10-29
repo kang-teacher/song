@@ -12,52 +12,37 @@
 
 작성 중인 내용은 브라우저에 자동 저장되어 새로고침해도 이어서 할 수 있습니다.
 
-## 실행 방법
+## 사이트 열기 (GitHub Pages)
+
+서버 없이 GitHub Pages만으로 동작합니다. 학생 브라우저가 Claude와 Suno(sunoapi.org)를 직접 호출해요.
+
+**처음 한 번만 설정:** 저장소의 **Settings → Pages → Build and deployment → Source**를 **GitHub Actions**로 바꿔 주세요.
+그 뒤로는 `main` 브랜치가 바뀔 때마다 자동으로 배포되고, 사이트 주소는 `https://<GitHub 아이디>.github.io/song/` 입니다.
+(Actions 탭의 "GitHub Pages 배포"에서 Run workflow를 눌러 바로 배포할 수도 있어요.)
+
+## API 키 넣기
+
+화면 왼쪽 칸(휴대폰에서는 위쪽)에 입력합니다.
+
+- `Claude API 키`: 가사 만들기에 쓰여요 ([platform.claude.com](https://platform.claude.com)에서 발급)
+- `Suno API 키`: 노래 만들기에 쓰여요 ([sunoapi.org](https://sunoapi.org)에서 발급)
+
+입력한 키는 그 컴퓨터의 브라우저에만 저장되고, Claude와 Suno에만 바로 전달돼요. GitHub에는 저장되지 않아요.
+다만 **그 컴퓨터를 쓰는 사람은 누구나 키를 볼 수 있으니**, 공용 컴퓨터라면 수업이 끝난 뒤 `키 지우기`를 눌러 주세요.
+키가 없으면 **데모 모드**로 동작합니다. 가사는 예시 가사로 채워지고 노래는 만들어지지 않지만, 전체 화면 흐름을 미리 확인할 수 있습니다.
+
+## 내 컴퓨터에서 실행 (개발용)
 
 ```bash
 npm install
 npm run dev                  # http://localhost:3000
 ```
 
-## API 키 넣기
-
-**가장 쉬운 방법: 화면 왼쪽 칸에 입력** (휴대폰에서는 위쪽)
-
-- `Claude API 키`: 가사 만들기에 쓰여요 ([platform.claude.com](https://platform.claude.com)에서 발급)
-- `Suno API 키`: 노래 만들기에 쓰여요 ([sunoapi.org](https://sunoapi.org)에서 발급)
-
-입력한 키는 그 컴퓨터의 브라우저에만 저장되고, 노래를 만들 때 이 사이트의 서버를 거쳐 Claude와 Suno로 전달돼요.
-GitHub나 다른 학생의 컴퓨터에는 저장되지 않아요. 다만 **그 컴퓨터를 쓰는 사람은 누구나 키를 볼 수 있으니**,
-공용 컴퓨터라면 수업이 끝난 뒤 `키 지우기`를 눌러 주세요.
-
-> 이 사이트는 서버(API 라우트)가 있어야 동작합니다. `npm run dev`로 직접 실행하거나 Vercel처럼 Node.js 서버를 지원하는 곳에 배포하세요. GitHub Pages 같은 정적 호스팅에서는 동작하지 않아요.
-
-**다른 방법: 서버 환경 변수** — 아래 환경 변수를 넣어 두면 학생이 키를 입력하지 않아도 돼요. 왼쪽 칸에 키를 입력하면 그 키가 우선 쓰여요.
-
-## 환경 변수 (.env.local, 선택)
-
-| 이름 | 설명 |
-| --- | --- |
-| `ANTHROPIC_API_KEY` | 가사 생성용 Claude API 키 ([platform.claude.com](https://platform.claude.com)) |
-| `CLAUDE_MODEL` | 선택. 가사 생성 모델 (기본 `claude-opus-5-5`) |
-| `SUNO_API_KEY` | 노래 생성용 [sunoapi.org](https://sunoapi.org) API 키 |
-| `SUNO_API_BASE` | 선택. 기본 `https://api.sunoapi.org` |
-| `SUNO_MODEL` | 선택. Suno 모델 버전 (기본 `V4_5`) |
-| `SUNO_CALLBACK_URL` | 선택. 기본은 이 사이트의 `/api/suno-callback` |
-| `CLASS_CODE` | 선택. 설정하면 학생이 화면 위쪽에 이 수업 코드를 입력해야 가사/노래를 만들 수 있습니다. 사이트를 인터넷에 공개할 때 API 사용량이 새지 않도록 꼭 설정하세요. |
-
-왼쪽 칸과 환경 변수 모두 키가 없으면 **데모 모드**로 동작합니다. 가사는 예시 가사로 채워지고 노래는 만들어지지 않지만, 전체 화면 흐름을 미리 확인할 수 있습니다.
-
-## 배포
-
-Vercel에 저장소를 연결하고 위 환경 변수를 넣으면 바로 배포됩니다.
-
 ## 구조
 
 - `lib/sdgs.ts` — 17개 목표와 추천 내용(배경 지식, 아이디어, 질문, 낱말). 수업에 맞게 자유롭게 고치세요.
 - `lib/options.ts` — 장르/목소리/분위기/빠르기/악기 선택지
 - `lib/lyrics.ts` — Claude 가사 생성 (학생 눈높이·안전한 표현 지시 포함)
-- `lib/keys.ts` — 입력한 키(요청 헤더) 또는 환경 변수 중 사용할 키 결정
 - `lib/suno.ts` — sunoapi.org 노래 생성/상태 조회. 다른 Suno 중계 서비스를 쓰려면 이 파일만 바꾸면 됩니다.
 - `app/SongMaker.tsx` — 5단계 화면
-- `app/api/*` — 서버 API (키는 서버에만 있고 브라우저로 노출되지 않음)
+- `.github/workflows/deploy.yml` — GitHub Pages 자동 배포

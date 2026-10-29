@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { SDGS, getSdg, type Sdg } from "@/lib/sdgs";
 import { GENRES, INSTRUMENTS, LENGTHS, LYRIC_MOODS, MOODS, TEMPOS, VOCALS } from "@/lib/options";
-import type { SongStatus } from "@/lib/suno";
+import { generateLyrics } from "@/lib/lyrics";
+import { createSong, getSongStatus, type SongStatus } from "@/lib/suno";
 
 type Draft = {
   step: number;
@@ -41,10 +42,8 @@ const EMPTY: Draft = {
 
 const STEPS = ["주제 고르기", "아이디어 정리", "가사 다듬기", "노래 설정", "노래 듣기"];
 const DRAFT_KEY = "sdgs-song-draft";
-const CODE_KEY = "sdgs-class-code";
 const KEYS_KEY = "sdgs-api-keys";
 
-type Config = { needsClassCode: boolean; serverAnthropicKey: boolean; serverSunoKey: boolean };
 type ApiKeys = { anthropic: string; suno: string };
 const NO_KEYS: ApiKeys = { anthropic: "", suno: "" };
 
@@ -60,21 +59,12 @@ function load<T>(key: string, fallback: T): T {
 export default function SongMaker() {
   const [d, setD] = useState<Draft>(EMPTY);
   const [loaded, setLoaded] = useState(false);
-  const [config, setConfig] = useState<Config | null>(null);
-  const [classCode, setClassCode] = useState("");
   const [keys, setKeys] = useState<ApiKeys>(NO_KEYS);
 
   useEffect(() => {
     setD(load(DRAFT_KEY, EMPTY));
-    try {
-      setClassCode(localStorage.getItem(CODE_KEY) ?? "");
-    } catch {}
     setKeys(load(KEYS_KEY, NO_KEYS));
     setLoaded(true);
-    fetch("/api/config")
-      .then((r) => r.json())
-      .then(setConfig)
-      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -91,13 +81,6 @@ export default function SongMaker() {
   };
   const sdg = d.sdgId ? getSdg(d.sdgId) : undefined;
 
-  const saveCode = (v: string) => {
-    setClassCode(v);
-    try {
-      localStorage.setItem(CODE_KEY, v);
-    } catch {}
-  };
-
   const saveKeys = (next: ApiKeys) => {
     setKeys(next);
     try {
@@ -105,24 +88,34 @@ export default function SongMaker() {
     } catch {}
   };
 
-  // 왼쪽 칸에 입력한 키는 요청 헤더로 이 사이트의 서버에 전달되고, 서버가 그 키로 Claude/Suno를 호출한다.
-  const authHeaders: Record<string, string> = {
-    "x-class-code": classCode,
-    "x-anthropic-key": keys.anthropic.trim(),
-    "x-suno-key": keys.suno.trim(),
-  };
-  const lyricsDemo = config ? !config.serverAnthropicKey && !keys.anthropic.trim() : false;
-  const songDemo = config ? !config.serverSunoKey && !keys.suno.trim() : false;
+  // 왼쪽 칸에 입력한 키로 브라우저에서 Claude와 Suno를 바로 호출한다 (서버 없음).
+  const anthropicKey = keys.anthropic.trim();
+  const sunoKey = keys.suno.trim();
+  const lyricsDemo = loaded && !anthropicKey;
+  const songDemo = loaded && !sunoKey;
 
-  const api = async (url: string, body: unknown) => {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders },
-      body: JSON.stringify(body),
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(json.error || "문제가 생겼어요. 잠시 후 다시 시도해 주세요.");
-    return json;
+  const api: Api = {
+    lyrics: (sdg) =>
+      generateLyrics(
+        { sdg, message: d.message, keywords: d.keywords, story: d.story, mood: d.lyricMood, length: d.length },
+        anthropicKey,
+      ),
+    song: () => {
+      if (d.lyrics.length > 3000) throw new Error("가사가 너무 길어요. 3000자 이내로 줄여 주세요.");
+      return createSong(
+        {
+          title: d.title.trim() || "나의 SDGs 노래",
+          lyrics: d.lyrics,
+          genre: d.genre,
+          vocal: d.vocal,
+          mood: d.mood,
+          tempo: d.tempo,
+          instruments: d.instruments,
+        },
+        sunoKey,
+      );
+    },
+    status: (taskId) => getSongStatus(taskId, sunoKey),
   };
 
   const reset = () => {
@@ -131,19 +124,13 @@ export default function SongMaker() {
 
   return (
     <div className="layout">
-      <KeyPanel keys={keys} onChange={saveKeys} config={config} />
+      <KeyPanel keys={keys} onChange={saveKeys} />
       <main className="wrap">
         <header className="top">
           <h1>
             <span className="logo">🎵</span> SDGs 노래 만들기
           </h1>
           <p className="sub">지속가능발전목표 17개 중 하나를 골라, 세상을 바꾸는 나만의 노래를 만들어 봐요!</p>
-          {config?.needsClassCode && (
-            <label className="code">
-              수업 코드
-              <input value={classCode} onChange={(e) => saveCode(e.target.value)} placeholder="선생님이 알려준 코드" />
-            </label>
-          )}
           {(lyricsDemo || songDemo) && (
             <p className="demo-banner">
               데모 모드: {lyricsDemo && "가사는 예시로 만들어지고"}
@@ -171,7 +158,7 @@ export default function SongMaker() {
         {d.step === 1 && sdg && <Brainstorm d={d} sdg={sdg} update={update} api={api} onDone={() => goto(2)} />}
         {d.step === 2 && sdg && <EditLyrics d={d} sdg={sdg} update={update} api={api} onBack={() => goto(1)} onDone={() => goto(3)} />}
         {d.step === 3 && <Settings d={d} update={update} onBack={() => goto(2)} onDone={() => goto(4)} />}
-        {d.step === 4 && <Generate d={d} api={api} sunoKey={keys.suno.trim()} onBack={() => goto(3)} />}
+        {d.step === 4 && <Generate d={d} api={api} onBack={() => goto(3)} />}
 
         <footer className="foot">
           <button className="link" onClick={reset}>처음부터 다시 만들기</button>
@@ -182,19 +169,18 @@ export default function SongMaker() {
 }
 
 /* 왼쪽 칸: API 키 입력 */
-function KeyPanel({ keys, onChange, config }: { keys: ApiKeys; onChange: (k: ApiKeys) => void; config: Config | null }) {
+function KeyPanel({ keys, onChange }: { keys: ApiKeys; onChange: (k: ApiKeys) => void }) {
   const [show, setShow] = useState(false);
 
-  const status = (typed: string, server: boolean | undefined) =>
-    typed.trim() ? { text: "입력됨", cls: "ok" } : server ? { text: "서버 키 사용 중", cls: "ok" } : { text: "없음 (데모)", cls: "none" };
-  const a = status(keys.anthropic, config?.serverAnthropicKey);
-  const s = status(keys.suno, config?.serverSunoKey);
+  const status = (typed: string) => (typed.trim() ? { text: "입력됨", cls: "ok" } : { text: "없음 (데모)", cls: "none" });
+  const a = status(keys.anthropic);
+  const s = status(keys.suno);
 
   return (
     <aside className="keys">
       <details open>
         <summary>🔑 API 키 설정</summary>
-        <p className="muted small">입력한 키는 이 컴퓨터의 브라우저에만 저장돼요.</p>
+        <p className="muted small">입력한 키는 이 컴퓨터의 브라우저에만 저장되고, Claude와 Suno에만 바로 전달돼요.</p>
 
         <label>
           <span>
@@ -239,7 +225,11 @@ function KeyPanel({ keys, onChange, config }: { keys: ApiKeys; onChange: (k: Api
   );
 }
 
-type Api = (url: string, body: unknown) => Promise<any>;
+type Api = {
+  lyrics: (sdg: Sdg) => Promise<{ title: string; lyrics: string }>;
+  song: () => Promise<string>;
+  status: (taskId: string) => Promise<SongStatus>;
+};
 type Update = (patch: Partial<Draft>) => void;
 
 /* 1단계: SDG 고르기 */
@@ -288,14 +278,7 @@ function Brainstorm({ d, sdg, update, api, onDone }: { d: Draft; sdg: Sdg; updat
     setBusy(true);
     setError("");
     try {
-      const r = await api("/api/lyrics", {
-        sdgId: sdg.id,
-        message: d.message,
-        keywords: d.keywords,
-        story: d.story,
-        mood: d.lyricMood,
-        length: d.length,
-      });
+      const r = await api.lyrics(sdg);
       update({ title: r.title, lyrics: r.lyrics });
       onDone();
     } catch (e) {
@@ -423,9 +406,7 @@ function EditLyrics({ d, sdg, update, api, onBack, onDone }: { d: Draft; sdg: Sd
     setBusy(true);
     setError("");
     try {
-      const r = await api("/api/lyrics", {
-        sdgId: sdg.id, message: d.message, keywords: d.keywords, story: d.story, mood: d.lyricMood, length: d.length,
-      });
+      const r = await api.lyrics(sdg);
       update({ title: r.title, lyrics: r.lyrics });
     } catch (e) {
       setError((e as Error).message);
@@ -542,7 +523,7 @@ function Settings({ d, update, onBack, onDone }: { d: Draft; update: Update; onB
 }
 
 /* 5단계: 노래 생성과 감상 */
-function Generate({ d, api, sunoKey, onBack }: { d: Draft; api: Api; sunoKey: string; onBack: () => void }) {
+function Generate({ d, api, onBack }: { d: Draft; api: Api; onBack: () => void }) {
   const [taskId, setTaskId] = useState<string | null>(null);
   const [status, setStatus] = useState<SongStatus | null>(null);
   const [error, setError] = useState("");
@@ -554,10 +535,7 @@ function Generate({ d, api, sunoKey, onBack }: { d: Draft; api: Api; sunoKey: st
     setStatus(null);
     setElapsed(0);
     try {
-      const r = await api("/api/song", {
-        title: d.title, lyrics: d.lyrics, genre: d.genre, vocal: d.vocal, mood: d.mood, tempo: d.tempo, instruments: d.instruments,
-      });
-      setTaskId(r.taskId);
+      setTaskId(await api.song());
     } catch (e) {
       setError((e as Error).message);
     }
@@ -577,9 +555,7 @@ function Generate({ d, api, sunoKey, onBack }: { d: Draft; api: Api; sunoKey: st
     const poll = async () => {
       while (!stop) {
         try {
-          const res = await fetch(`/api/song/${encodeURIComponent(taskId)}`, { headers: { "x-suno-key": sunoKey } });
-          const s: SongStatus & { error?: string } = await res.json();
-          if (!res.ok) throw new Error(s.error);
+          const s = await api.status(taskId);
           if (stop) return;
           setStatus(s);
           if (s.status === "done" || s.status === "failed") break;

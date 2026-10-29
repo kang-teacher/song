@@ -30,7 +30,8 @@ export type SongStatus = {
   tracks: SongTrack[];
 };
 
-const BASE = process.env.SUNO_API_BASE || "https://api.sunoapi.org";
+const BASE = "https://api.sunoapi.org";
+const MODEL = "V4_5";
 const DEMO_PREFIX = "demo-";
 
 export function buildStyle(s: SongSettings): string {
@@ -38,7 +39,7 @@ export function buildStyle(s: SongSettings): string {
   return [s.genre, s.mood, s.tempo, ...s.instruments, vocal, "Korean lyrics"].filter(Boolean).join(", ");
 }
 
-export async function createSong(s: SongSettings, callbackUrl: string, key: string | undefined): Promise<string> {
+export async function createSong(s: SongSettings, key: string | undefined): Promise<string> {
   if (!key) return `${DEMO_PREFIX}${Date.now()}`;
 
   const res = await fetch(`${BASE}/api/v1/generate`, {
@@ -47,12 +48,13 @@ export async function createSong(s: SongSettings, callbackUrl: string, key: stri
     body: JSON.stringify({
       customMode: true,
       instrumental: false,
-      model: process.env.SUNO_MODEL || "V4_5",
+      model: MODEL,
       title: s.title.slice(0, 80),
       prompt: s.lyrics,
       style: buildStyle(s),
       vocalGender: s.vocal,
-      callBackUrl: callbackUrl,
+      // sunoapi.org는 callBackUrl이 필수다. 결과는 상태 조회로 받으므로 이 사이트 주소를 넣어 둔다.
+      callBackUrl: window.location.href,
     }),
   });
 
@@ -77,7 +79,6 @@ export async function getSongStatus(taskId: string, key: string | undefined): Pr
 
   const res = await fetch(`${BASE}/api/v1/generate/record-info?taskId=${encodeURIComponent(taskId)}`, {
     headers: { Authorization: `Bearer ${key}` },
-    cache: "no-store",
   });
   const json = await res.json().catch(() => null);
   if (!res.ok || json?.code !== 200) {

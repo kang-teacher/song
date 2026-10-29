@@ -42,7 +42,8 @@ export async function generateLyrics(req: LyricsRequest, apiKey: string | undefi
     return demoLyrics(req);
   }
 
-  const client = new Anthropic({ apiKey });
+  // GitHub Pages에는 서버가 없으므로 브라우저에서 바로 호출한다. 키는 사용자가 직접 입력한 값.
+  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
   const prompt = `SDG ${req.sdg.id}번 "${req.sdg.title}" (${req.sdg.short})를 주제로 노래 가사를 써 줘.
 
 학생이 전하고 싶은 메시지: ${req.message || "(없음)"}
@@ -55,7 +56,7 @@ export async function generateLyrics(req: LyricsRequest, apiKey: string | undefi
 
   const response = await client.beta.messages
     .parse({
-      model: process.env.CLAUDE_MODEL || "claude-opus-5-5",
+      model: "claude-opus-5-5",
       max_tokens: 16000,
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
