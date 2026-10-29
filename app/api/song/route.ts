@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { checkClassCode } from "@/lib/access";
+import { sunoKey } from "@/lib/keys";
 import { createSong } from "@/lib/suno";
 
 export async function POST(req: Request) {
@@ -24,6 +25,7 @@ export async function POST(req: Request) {
         instruments: Array.isArray(body.instruments) ? body.instruments.slice(0, 5).map(String) : [],
       },
       process.env.SUNO_CALLBACK_URL || `${origin}/api/suno-callback`,
+      sunoKey(req),
     );
     return NextResponse.json({ taskId });
   } catch (e) {

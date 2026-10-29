@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { checkClassCode } from "@/lib/access";
+import { anthropicKey } from "@/lib/keys";
 import { generateLyrics, type LyricsRequest } from "@/lib/lyrics";
 import { getSdg } from "@/lib/sdgs";
 
@@ -22,7 +23,7 @@ export async function POST(req: Request) {
       mood: clip(body.mood, 50),
       keywords: Array.isArray(body.keywords) ? body.keywords.slice(0, 12).map((k: unknown) => clip(k, 30)) : [],
       length,
-    });
+    }, anthropicKey(req));
     return NextResponse.json(result);
   } catch (e) {
     console.error(e);
